@@ -1,36 +1,66 @@
+"""
+Finds the shortest path between two wikipedia articles.
+
+Please use sparingly.
+"""
 from queue import Queue
 import re
 from sys import argv
 from bs4 import BeautifulSoup
 import requests
 
-URL_REGEX = r"/wiki/(?!(?:Template|Template_talk|Category|Help|File|Special)\:)([^#]+)"
+URL_REGEX = (r"/wiki/(?!(?:Talk|Wikipedia|User|Template|Template_talk"
+             r"|Category|Help|File|Special)\:)([^#\"]+)")
+
 
 def closest_path(url_1, url_2):
+    """
+        Finds the closest path between two articles on Wikpedia.
 
-    match_1 = re.search(URL_REGEX, url_1)
-    match_2 = re.search(URL_REGEX, url_2)
-    
-    if not (match_1 and match_2):
+        :param url_1: Starting article
+        :param url_2: Endpoint article
+        :returns Dictionary with url key and optionally a parent key
+                 or an empty dictionary
+    """
+    starting_article = re.search(URL_REGEX, url_1)
+    end_article = re.search(URL_REGEX, url_2)
+
+    if not (starting_article and end_article):
         raise Exception("Incorrect url format.")
 
-    match_goal = match_2.group(1)
+    goal = end_article.group(1)
 
-    queue, to_lookup = Queue(), Queue()
-    queue.put({"url": match_1.group(1)})
+    to_compare, to_lookup = Queue(), Queue()
+    to_compare.put({"url": starting_article.group(1)})
     visited = set()
 
-    while not queue.empty():
-        url = queue.get()
-        if url["url"] not in visited:
-            if url["url"] == match_goal:
-                return url
-            to_lookup.put(url)
-            visited.add(url["url"])
-        if queue.empty():
-            populate_queue(queue, to_lookup.get())
+    while not to_compare.empty():
+
+        article = to_compare.get()
+
+        if article["url"] not in visited:
+
+            if article["url"] == goal:
+
+                return article
+
+            to_lookup.put(article)
+            visited.add(article["url"])
+
+        if to_compare.empty():
+
+            populate_queue(to_compare, to_lookup.get())
+
+    return {}
+
 
 def fetch_page(url):
+    """
+        Makes a GET request to a Wikipedia article and extracts raw body.
+
+        :param url: Wikipedia article URL  (e.g. "/wiki/Python")
+        :return raw HTML body of the article
+    """
     print(f"Loading {url}")
     wiki_url = "https://en.wikipedia.org/wiki/" + url
     response = requests.get(wiki_url).text
@@ -38,27 +68,56 @@ def fetch_page(url):
     urls = soup.find("div", {"id": "bodyContent"})
     return urls.decode()
 
-def get_all_urls(page, url):
-    matches = re.findall(r"href=\"\/wiki\/(?!(?:Template|Template_talk|Category|Help|File|Special)\:)([^#]+?)\"", page)
-    
+
+def get_all_urls(page, article):
+    """
+        finds all the linked Wikipedia URLs on a certain page
+
+        :param page: Raw wikipedia HTML body
+        :param article: Dictionary with "url" pointing to a Wikipedia article
+        :return Set of Wikipedia article URLs
+    """
+    matches = re.findall(URL_REGEX, page)
+
     unique_matches = set(matches)
-    if url["url"] in unique_matches:
-        unique_matches.remove(url["url"])
+    if article["url"] in unique_matches:
+        unique_matches.remove(article["url"])
     return unique_matches
 
-def populate_queue(queue, url):
-    response = fetch_page(url["url"])
-    for child_url in get_all_urls(response, url):
-        queue.put({"url": child_url, "parent": url})
+
+def populate_queue(queue, article):
+    """
+        fetches the article and puts all the links in it
+        on the queue
+
+        :param queue: Queue object to populate
+        :article Dictionary with "url" pointing to a Wikipedia article
+    """
+    response = fetch_page(article["url"])
+    for child_url in get_all_urls(response, article):
+        queue.put({"url": child_url, "parent": article})
+
 
 def generate_string(answer):
+    """
+        generates proper string representation of the article
+        chain
+
+        :param answer: dictionary with url key and optionally a parent key
+        :return string representation
+    """
     parent = answer.get("parent")
+
     if parent:
         return f"{generate_string(parent)} --> {answer['url']}"
-    else:
-        return answer["url"]
+
+    return answer["url"]
+
 
 def main():
+    """
+        Main function. Get two Wikipedia articles and finds closest link.
+    """
     try:
         answer = closest_path(argv[1], argv[2])
         if answer:
@@ -66,7 +125,8 @@ def main():
         else:
             print("No link found.")
     except IndexError:
-        "Usage: python closestpath.py [first_url] [second_url]"
+        print("Usage: python closestpath.py [first_url] [second_url]")
+
 
 if __name__ == "__main__":
     main()
